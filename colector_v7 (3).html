@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0f1e">
+<title>ColectorDeDatos</title>
+
+<!-- Firebase SDK (compat) — usa Firestore igual que MinimarketAlberdi -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<!-- ZXing-js — lee EAN-13, EAN-8, UPC-A, UPC-E, Code128, Code39, QR y más -->
+<script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.2/umd/index.min.js"></script>
+
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #0a0f1e;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --accent: #00e5ff;
+    --accent2: #ff6b35;
+    --ok: #00ff88;
+    --warn: #ffcc00;
+    --danger: #ff3b5c;
+    --text: #e8f0fe;
+    --muted: #5a7080;
+    --border: rgba(0,229,255,0.18);
+    --btn-h: 72px;
+    --radius: 14px;
+    --font-head: 'Rajdhani', sans-serif;
+    --font-mono: 'Share Tech Mono', monospace;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:var(--bg); color:var(--text);
+    font-family:var(--font-head); user-select:none;
+  }
+
+  /* FULLSCREEN TOGGLE */
+  body.fs-active { overflow: hidden; }
+
+  /* SCAN LINE ANIMATION */
+  body::before {
+    content:''; position:fixed; top:0; left:0; right:0; bottom:0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,229,255,0.015) 2px, rgba(0,229,255,0.015) 4px);
+    pointer-events:none; z-index:9999; animation: scandown 8s linear infinite;
+  }
+  @keyframes scandown { 0%{background-position:0 0} 100%{background-position:0 100%} }
+
+  /* APP SHELL */
+  #app {
+    display:flex; flex-direction:column;
+    width:100%; height:100vh;
+    max-width:480px; margin:0 auto;
+    position:relative; overflow:hidden;
+  }
+
+  /* HEADER */
+  #header {
+    background: linear-gradient(135deg, #0d1b2a 0%, #111827 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px 8px;
+    flex-shrink:0;
+    position:relative;
+  }
+  #header::after {
+    content:''; position:absolute; bottom:0; left:0; right:0; height:2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: pulse-line 3s ease-in-out infinite;
+  }
+  @keyframes pulse-line { 0%,100%{opacity:0.3} 50%{opacity:1} }
+
+  .header-top {
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .app-logo {
+    display:flex; align-items:center; gap:8px;
+  }
+  .logo-icon {
+    width:34px; height:34px;
+    background: linear-gradient(135deg, var(--accent), #0066ff);
+    border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; box-shadow: 0 0 12px rgba(0,229,255,0.4);
+  }
+  .app-title { font-size:20px; font-weight:700; letter-spacing:1px; color:var(--accent); }
+  .app-sub { font-size:10px; color:var(--muted); letter-spacing:2px; font-family:var(--font-mono); }
+
+  .header-actions { display:flex; gap:8px; }
+
+  /* STATUS BAR */
+  #statusbar {
+    background:var(--surface);
+    padding: 6px 16px;
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:1px solid var(--border);
+    flex-shrink:0;
+  }
+  .status-dot {
+    width:8px; height:8px; border-radius:50%;
+    background:var(--muted);
+    box-shadow:0 0 6px var(--muted);
+    transition:all 0.4s;
+  }
+  .status-dot.connected { background:var(--ok); box-shadow:0 0 8px var(--ok); animation:blink 2s infinite; }
+  .status-dot.error { background:var(--danger); box-shadow:0 0 8px var(--danger); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .status-text { font-size:11px; font-family:var(--font-mono); color:var(--muted); }
+  .status-count { font-size:12px; font-family:var(--font-mono); color:var(--accent); font-weight:600; }
+
+  /* MAIN CONTENT */
+  #main { flex:1; overflow-y:auto; overflow-x:hidden; padding:12px; display:flex; flex-direction:column; gap:12px; }
+  #main::-webkit-scrollbar { display:none; }
+
+  /* SEARCH BAR */
+  #searchbar {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:0 14px;
+    display:flex; align-items:center; gap:10px;
+    transition:border-color 0.3s;
+  }
+  #searchbar:focus-within { border-color:var(--accent); box-shadow:0 0 0 2px rgba(0,229,255,0.1); }
+  #searchbar .s-icon { font-size:20px; color:var(--muted); flex-shrink:0; }
+  #searchInput {
+    flex:1; height:54px; background:transparent; border:none; outline:none;
+    color:var(--text); font-family:var(--font-mono); font-size:15px;
+    caret-color:var(--accent);
+  }
+  #searchInput::placeholder { color:var(--muted); }
+  #clearSearch {
+    width:32px; height:32px; border-radius:50%;
+    background:var(--surface2); border:none;
+    color:var(--muted); font-size:16px; cursor:pointer;
+    display:none; align-items:center; justify-content:center;
+  }
+  #clearSearch.visible { display:flex; }
+
+  /* PRODUCT CARD */
+  .product-card {
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+    border:1px solid var(--border); border-radius:var(--radius);
+    padding:14px; cursor:pointer;
+    transition: transform 0.15s, border-color 0.2s, box-shadow 0.2s;
+    position:relative; overflow:hidden;
+    animation: slideup 0.25s ease both;
+  }
+  @keyframes slideup { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+  .product-card::before {
+    content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background: linear-gradient(180deg, var(--accent), #0066ff);
+    border-radius:3px 0 0 3px;
+  }
+  .product-card:active { transform:scale(0.98); border-color:var(--accent); box-shadow:0 0 16px rgba(0,229,255,0.2); }
+
+  .card-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; }
+  .card-name { font-size:16px; font-weight:700; line-height:1.2; flex:1; padding-right:8px; }
+  .card-badge {
+    font-size:10px; font-family:var(--font-mono); padding:3px 8px;
+    border-radius:20px; border:1px solid; white-space:nowrap; flex-shrink:0;
+  }
+  .badge-ok { color:var(--ok); border-color:var(--ok); background:rgba(0,255,136,0.08); }
+  .badge-low { color:var(--warn); border-color:var(--warn); background:rgba(255,204,0,0.08); }
+  .badge-out { color:var(--danger); border-color:var(--danger); background:rgba(255,59,92,0.08); }
+
+  .card-meta { display:flex; gap:10px; flex-wrap:wrap; }
+  .meta-item { font-size:11px; font-family:var(--font-mono); color:var(--muted); }
+  .meta-value { color:var(--text); font-weight:600; }
+  .card-price { font-size:22px; font-weight:700; color:var(--accent); font-family:var(--font-mono); }
+  .card-code { font-size:10px; font-family:var(--font-mono); color:var(--muted); margin-top:6px; }
+
+  /* EMPTY STATE */
+  #emptyState {
+    display:none; flex-direction:column; align-items:center; justify-content:center;
+    padding:48px 24px; gap:16px; text-align:center;
+  }
+  .empty-icon { font-size:56px; opacity:0.3; }
+  .empty-text { font-size:18px; color:var(--muted); font-weight:600; }
+  .empty-sub { font-size:13px; color:var(--muted); font-family:var(--font-mono); }
+
+  /* BIG BUTTONS */
+  .btn-row { display:flex; gap:10px; }
+  .btn-big {
+    height:var(--btn-h); border-radius:var(--radius);
+    border:none; font-family:var(--font-head);
+    font-size:16px; font-weight:700; letter-spacing:1px;
+    cursor:pointer; transition:all 0.2s;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    position:relative; overflow:hidden;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn-big:active { transform:scale(0.97); }
+  .btn-big::after {
+    content:''; position:absolute; inset:0;
+    background:rgba(255,255,255,0.08); opacity:0;
+    transition:opacity 0.2s;
+  }
+  .btn-big:active::after { opacity:1; }
+  .btn-primary {
+    flex:1; background: linear-gradient(135deg, #00e5ff, #0066ff);
+    color:#000; box-shadow:0 4px 20px rgba(0,229,255,0.35);
+  }
+  .btn-secondary {
+    flex:1; background:var(--surface2); color:var(--text);
+    border:1px solid var(--border);
+  }
+  .btn-danger-sm {
+    width:72px; height:72px; background:rgba(255,59,92,0.15);
+    color:var(--danger); border:1px solid rgba(255,59,92,0.3);
+    font-size:24px; flex-shrink:0;
+  }
+  .btn-icon { font-size:22px; }
+
+  /* MODAL */
+  #modal-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.75);
+    z-index:1000; display:none; align-items:flex-end;
+    backdrop-filter:blur(4px);
+  }
+  #modal-overlay.open { display:flex; }
+  #modal {
+    width:100%; max-width:480px; margin:0 auto;
+    background:var(--surface);
+    border-radius:20px 20px 0 0;
+    border-top:2px solid var(--accent);
+    padding:24px; max-height:80vh; overflow-y:auto;
+    animation:slidemodal 0.3s ease;
+  }
+  @keyframes slidemodal { from{transform:translateY(100%)} to{transform:translateY(0)} }
+  .modal-handle { width:40px; height:4px; background:var(--muted); border-radius:2px; margin:0 auto 20px; }
+  .modal-title { font-size:20px; font-weight:700; color:var(--accent); margin-bottom:16px; }
+  .modal-detail { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); }
+  .modal-label { font-size:13px; color:var(--muted); font-family:var(--font-mono); }
+  .modal-value { font-size:14px; font-weight:600; }
+  .modal-actions { display:flex; gap:10px; margin-top:20px; }
+
+  /* CONFIG MODAL */
+  #config-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.85);
+    z-index:2000; display:none; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  #config-overlay.open { display:flex; }
+  #config-box {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:20px; padding:24px; width:100%; max-width:440px;
+    animation:fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
+  .config-title { font-size:18px; font-weight:700; color:var(--accent); margin-bottom:20px; text-align:center; }
+  .config-field { margin-bottom:14px; }
+  .config-label { font-size:11px; font-family:var(--font-mono); color:var(--muted); margin-bottom:6px; display:block; letter-spacing:1px; }
+  .config-input {
+    width:100%; height:48px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:10px; color:var(--text); padding:0 14px;
+    font-family:var(--font-mono); font-size:13px; outline:none;
+    transition:border-color 0.2s;
+  }
+  .config-input:focus { border-color:var(--accent); }
+  .config-note { font-size:11px; color:var(--muted); margin-top:4px; font-family:var(--font-mono); }
+
+  /* ADD PRODUCT MODAL */
+  #add-product-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.85);
+    z-index:2000; display:none; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  #add-product-overlay.open { display:flex; }
+  #add-product-box {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:20px; padding:24px; width:100%; max-width:440px;
+    animation:fadeIn 0.2s ease; max-height:90vh; overflow-y:auto;
+  }
+
+  /* TOAST */
+  #toast {
+    position:fixed; bottom:110px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:30px; padding:10px 22px;
+    font-size:13px; font-family:var(--font-mono); color:var(--text);
+    opacity:0; transition:all 0.3s; z-index:5000; white-space:nowrap;
+    max-width:90vw; text-align:center;
+  }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  #toast.ok { border-color:var(--ok); color:var(--ok); }
+  #toast.err { border-color:var(--danger); color:var(--danger); }
+  #toast.warn { border-color:var(--warn); color:var(--warn); }
+
+  /* LOADER */
+  #loader {
+    position:fixed; inset:0; background:var(--bg);
+    z-index:9000; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:20px;
+  }
+  .loader-logo { font-size:32px; font-weight:700; color:var(--accent); letter-spacing:2px; font-family:var(--font-head); }
+  .loader-bar { width:200px; height:3px; background:var(--surface2); border-radius:2px; overflow:hidden; }
+  .loader-fill { height:100%; background: linear-gradient(90deg, var(--accent), #0066ff); width:0%; border-radius:2px; transition:width 0.4s ease; }
+  .loader-status { font-size:12px; font-family:var(--font-mono); color:var(--muted); }
+
+  /* COLLECT ANIMATION */
+  .collect-flash {
+    position:fixed; inset:0; background:rgba(0,255,136,0.15);
+    z-index:4000; pointer-events:none; opacity:0; transition:opacity 0.1s;
+  }
+  .collect-flash.show { opacity:1; }
+
+  /* CAMERA INLINE */
+  @keyframes scanAnim {
+    0%   { top: 20%; }
+    50%  { top: 70%; }
+    100% { top: 20%; }
+  }
+  #searchbar { gap: 6px; }
+  #searchbar input { min-width: 0; }
+</style>
+</head>
+<body>
+
+<div id="loader">
+  <div class="loader-logo">📦 COLECTOR</div>
+  <div class="loader-bar"><div class="loader-fill" id="loaderFill"></div></div>
+  <div class="loader-status" id="loaderStatus">Iniciando...</div>
+</div>
+
+<div id="app">
+  <!-- HEADER -->
+  <div id="header">
+    <div class="header-top">
+      <div class="app-logo">
+        <div class="logo-icon">📦</div>
+        <div>
+          <div class="app-title">COLECTOR</div>
+          <div class="app-sub">v2.0</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn-big btn-danger-sm" onclick="openAddProduct()" style="width:44px;height:44px;font-size:20px;border-radius:10px;background:rgba(0,255,136,0.1);color:var(--ok);border-color:rgba(0,255,136,0.3)" title="Agregar producto">➕</button>
+        <button class="btn-big btn-danger-sm" onclick="syncProducts()" id="syncBtn" style="width:44px;height:44px;font-size:18px;border-radius:10px;background:rgba(0,229,255,0.1);color:var(--accent);border-color:var(--border)" title="Sincronizar">🔄</button>
+        <button class="btn-big btn-danger-sm" onclick="toggleFullscreen()" id="fsBtn" style="width:44px;height:44px;font-size:18px;border-radius:10px;background:rgba(120,80,255,0.15);color:#a78bfa;border-color:rgba(120,80,255,0.3)" title="Pantalla completa">⛶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATUS BAR -->
+  <div id="statusbar">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-text" id="statusText">Sin conexión</span>
+    </div>
+    <span class="status-count" id="productCount">0 artículos</span>
+    <span class="status-text" id="lastSync">—</span>
+  </div>
+
+  <!-- MAIN -->
+  <div id="main">
+    <!-- SEARCH + CAMERA -->
+    <div id="searchbar">
+      <span class="s-icon">🔍</span>
+      <input type="text" id="searchInput" placeholder="Buscar por nombre o código..." autocomplete="off" autocorrect="off" spellcheck="false" oninput="handleSearch()">
+      <button id="clearSearch" onclick="clearSearch()" style="display:none;width:36px;height:36px;font-size:16px;border-radius:50%;padding:0;background:transparent;border:none;color:var(--muted);cursor:pointer">✕</button>
+      <button id="camBtn" onclick="toggleCamera()" style="width:44px;height:44px;font-size:20px;border-radius:10px;background:rgba(255,107,53,0.15);color:var(--accent2);border:1px solid rgba(255,107,53,0.4);cursor:pointer;flex-shrink:0" title="Escanear código de barras">📷</button>
+    </div>
+
+    <!-- INLINE CAMERA VIEW -->
+    <div id="cameraView" style="display:none;position:relative;margin:0 0 8px 0;border-radius:14px;overflow:hidden;background:#000;border:1px solid var(--border)">
+      <video id="cameraVideo" playsinline style="width:100%;display:block;max-height:220px;object-fit:cover"></video>
+      <canvas id="cameraCanvas" style="display:none"></canvas>
+      <!-- Visor guía -->
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+        <div style="width:70%;height:80px;border:2px solid var(--accent);border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,0.35)"></div>
+      </div>
+      <!-- Línea de escaneo animada -->
+      <div id="scanLine" style="position:absolute;left:15%;width:70%;height:2px;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:scanAnim 1.5s linear infinite"></div>
+      <button onclick="toggleCamera()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);border:none;color:#fff;border-radius:50%;width:32px;height:32px;font-size:16px;cursor:pointer;z-index:10">✕</button>
+      <div style="position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,0.7);font-family:var(--font-mono)">Apuntá al código de barras</div>
+    </div>
+
+    <!-- PRODUCTS LIST -->
+    <div id="productList"></div>
+
+  <!-- EMPTY STATE -->
+  <div id="emptyState">
+    <div class="empty-icon">🗄️</div>
+    <div class="empty-text">Sin resultados</div>
+    <div class="empty-sub">Intenta con otro término o sincroniza</div>
+  </div>
+
+  <!-- FIREBASE ERROR PANEL -->
+  <div id="firebaseErrorPanel" style="display:none;background:rgba(255,59,92,0.07);border:1px solid rgba(255,59,92,0.35);border-radius:14px;padding:16px;margin:4px 0">
+    <div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:6px">⚠️ No se pudo conectar a Firebase</div>
+    <div id="errorDetail" style="font-size:11px;font-family:var(--font-mono);color:var(--warn);margin-bottom:12px;line-height:1.6"></div>
+
+    <details style="margin-bottom:12px">
+      <summary style="font-size:11px;font-weight:700;color:var(--accent);cursor:pointer;font-family:var(--font-mono);letter-spacing:1px">
+        📋 CÓMO CONFIGURAR LAS REGLAS DE FIRESTORE
+      </summary>
+      <div style="font-size:11px;font-family:var(--font-mono);color:var(--muted);line-height:1.9;margin-top:10px;padding-left:8px;border-left:2px solid var(--border)">
+        <b style="color:var(--text)">1.</b> Entrá a <a href="https://console.firebase.google.com" target="_blank" style="color:var(--accent)">console.firebase.google.com</a><br>
+        <b style="color:var(--text)">2.</b> Proyecto <b style="color:var(--ok)">minimarket-alberdi</b> → <b>Firestore Database</b><br>
+        <b style="color:var(--text)">3.</b> Pestaña <b style="color:var(--text)">Reglas</b><br>
+        <b style="color:var(--text)">4.</b> Reemplazá todo el contenido con esto:<br>
+        <code style="color:var(--accent);display:block;margin:6px 0;padding:8px;background:var(--surface2);border-radius:6px;font-size:10px;white-space:pre">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</code>
+        <b style="color:var(--text)">5.</b> Clic en <b style="color:var(--ok)">Publicar</b><br><br>
+        <span style="color:var(--warn)">⚠️ Esto permite acceso público. OK para uso interno/local.</span>
+      </div>
+    </details>
+
+    <button onclick="document.getElementById('firebaseErrorPanel').style.display='none';connectFirebase(FIREBASE_CONFIG)" 
+      style="width:100%;height:46px;border-radius:10px;background:rgba(0,229,255,0.1);border:1px solid var(--border);color:var(--accent);font-family:var(--font-head);font-size:14px;font-weight:700;cursor:pointer;letter-spacing:1px">
+      🔄 REINTENTAR CONEXIÓN
+    </button>
+  </div>
+  </div>
+
+  </div>
+
+<!-- PRODUCT DETAIL MODAL -->
+<div id="modal-overlay" onclick="closeModal(event)">
+  <div id="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modalTitle">Detalle</div>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button class="btn-big btn-secondary" style="height:60px" onclick="closeModal()">✕ CERRAR</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIG MODAL (OCULTO - Configuración hardcodeada) -->
+<div id="config-overlay" onclick="closeConfigOutside(event)" style="display:none">
+  <div id="config-box">
+    <div class="config-title">⚙️ CONFIGURACIÓN FIREBASE</div>
+    <p style="color:var(--muted);font-size:12px;text-align:center;margin-bottom:20px">La configuración está hardcodeada. Contacta al administrador para cambiarla.</p>
+  </div>
+</div>
+
+<!-- ADD PRODUCT MODAL -->
+<div id="add-product-overlay" onclick="closeAddProductOutside(event)">
+  <div id="add-product-box">
+    <div class="config-title">➕ AGREGAR PRODUCTO</div>
+
+    <div class="config-field">
+      <label class="config-label">CÓDIGO DE BARRAS <span style="color:var(--muted)">(opcional)</span></label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="config-input" id="new-codigo" placeholder="Dejar vacío si no tiene código"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          inputmode="numeric" style="flex:1;margin-bottom:0">
+        <button id="formCamBtn" onclick="toggleFormCamera()" title="Escanear con cámara"
+          style="width:48px;height:48px;flex-shrink:0;border-radius:10px;
+                 background:rgba(255,107,53,0.15);border:1px solid rgba(255,107,53,0.4);
+                 color:#ff6b35;font-size:22px;cursor:pointer;display:flex;
+                 align-items:center;justify-content:center">
+          📷
+        </button>
+      </div>
+      <!-- Cámara inline dentro del formulario -->
+      <div id="formCameraView" style="display:none;position:relative;margin-top:8px;border-radius:12px;overflow:hidden;background:#000;border:1px solid var(--border)">
+        <video id="formCameraVideo" playsinline style="width:100%;display:block;max-height:200px;object-fit:cover"></video>
+        <canvas id="formCameraCanvas" style="display:none"></canvas>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+          <div style="width:75%;height:70px;border:2px solid #00e5ff;border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,0.35)"></div>
+        </div>
+        <div id="formScanLine" style="position:absolute;left:12.5%;width:75%;height:2px;background:#00e5ff;box-shadow:0 0 8px #00e5ff;animation:scanAnim 1.5s linear infinite"></div>
+        <button onclick="stopFormCamera()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.65);border:none;color:#fff;border-radius:50%;width:30px;height:30px;font-size:15px;cursor:pointer;z-index:10">✕</button>
+        <div style="position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,0.7);font-family:var(--font-mono)">Apuntá al código de barras</div>
+      </div>
+    </div>
+
+    <div class="config-field">
+      <label class="config-label">NOMBRE / DESCRIPCIÓN *</label>
+      <input class="config-input" id="new-nombre" placeholder="Ej: Aceite Cocinero 1.5L"
+        autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="config-field">
+      <label class="config-label">PRECIO DE COMPRA (COSTO) *</label>
+      <input class="config-input" id="new-costo" placeholder="0.00" type="number" step="0.01"
+        inputmode="decimal" autocomplete="off">
+    </div>
+    <div class="config-field">
+      <label class="config-label">PRECIO DE VENTA *</label>
+      <input class="config-input" id="new-precio" placeholder="0.00" type="number" step="0.01"
+        inputmode="decimal" autocomplete="off">
+    </div>
+    <div class="config-field">
+      <label class="config-label">PROVEEDOR</label>
+      <input class="config-input" id="new-proveedor" placeholder="Nombre del proveedor"
+        autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div style="display:flex;gap:10px">
+      <div class="config-field" style="flex:1">
+        <label class="config-label">STOCK</label>
+        <input class="config-input" id="new-stock" placeholder="0" type="number"
+          inputmode="numeric" autocomplete="off">
+      </div>
+      <div class="config-field" style="flex:1">
+        <label class="config-label">STOCK MÍN.</label>
+        <input class="config-input" id="new-stock-min" placeholder="0" type="number"
+          inputmode="numeric" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn-big btn-primary" style="height:60px" onclick="saveNewProduct()">✓ GUARDAR</button>
+      <button class="btn-big btn-secondary" style="height:60px;width:70px;flex:unset" onclick="closeAddProduct()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+<!-- FLASH -->
+<div class="collect-flash" id="flash"></div>
+
+<script>
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+let products = {};        // All products from Firestore
+let filtered = [];        // Current filtered list
+let modalProduct = null;
+let fbApp = null;
+let fbFirestore = null;   // Cloud Firestore
+let unsubscribeProducts = null;
+
+const CONFIG_KEY = 'colector_firebase_cfg';
+const CACHE_KEY  = 'colector_products_cache';
+const CONNECTION_TIMEOUT = 10000;  // 10 segundos de timeout
+
+// ─── CONFIGURACIÓN FIREBASE ───────────────────────────────────────────────────
+// Misma config que MinimarketAlberdi — usa Cloud Firestore, colección "productos"
+// Cada doc tiene: codigo, nombre, precio, costo, stock, stockMin, categoria, unidad
+const FIREBASE_CONFIG = {
+  apiKey:            'AIzaSyD3YBS-iy7Xy7jNbxm6VvVoORZQNSSgLco',
+  authDomain:        'minimarket-alberdi.firebaseapp.com',
+  projectId:         'minimarket-alberdi',
+  storageBucket:     'minimarket-alberdi.firebasestorage.app',
+  messagingSenderId: '586362734543',
+  appId:             '1:586362734543:web:cdcc9c9c5bb28e01d1f4ba',
+  collection: 'productos'   // colección Firestore (igual que en MinimarketAlberdi)
+};
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+async function init() {
+  setLoader('Cargando configuración...', 20);
+  await sleep(300);
+
+  loadCachedProducts();
+  setLoader('Conectando a Firebase...', 60);
+  await sleep(300);
+
+  // Usar configuración hardcodeada
+  const cfg = FIREBASE_CONFIG;
+  await connectFirebase(cfg);
+
+  setLoader('Listo ✓', 100);
+  await sleep(400);
+  document.getElementById('loader').style.display = 'none';
+}
+
+function setLoader(msg, pct) {
+  document.getElementById('loaderStatus').textContent = msg;
+  document.getElementById('loaderFill').style.width = pct + '%';
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ═══════════════════════════════════════
+// FIREBASE CONFIG - PERSISTENCIA MEJORADA
+// ═══════════════════════════════════════
+function getConfig() {
+  return FIREBASE_CONFIG;
+}
+
+function saveConfig() {
+  // No hacer nada - configuración hardcodeada
+  closeConfig();
+  showToast('Configuración fija - No se puede modificar', 'warn');
+}
+
+function openConfig() {
+  // No abrir modal - configuración hardcodeada
+  showToast('Configuración fija - No se puede modificar', 'warn');
+}
+
+function closeConfig()  { 
+  document.getElementById('config-overlay').classList.remove('open'); 
+}
+
+function closeConfigOutside(e) { 
+  if(e.target.id==='config-overlay') closeConfig(); 
+}
+
+// ═══════════════════════════════════════
+// FIREBASE CONNECT — Cloud Firestore
+// ═══════════════════════════════════════
+async function connectFirebase(cfg) {
+  try {
+    // Cancelar listener anterior si existe
+    if (unsubscribeProducts) { unsubscribeProducts(); unsubscribeProducts = null; }
+
+    // Limpiar apps anteriores
+    if (firebase.apps.length > 0) {
+      for (const app of firebase.apps) { try { await app.delete(); } catch(e) {} }
+    }
+
+    console.log('Iniciando Firestore:', cfg.projectId, '| Colección:', cfg.collection);
+
+    fbApp = firebase.initializeApp({
+      apiKey:            cfg.apiKey,
+      authDomain:        cfg.authDomain,
+      projectId:         cfg.projectId,
+      storageBucket:     cfg.storageBucket,
+      messagingSenderId: cfg.messagingSenderId,
+      appId:             cfg.appId
+    });
+
+    fbFirestore = firebase.firestore(fbApp);
+
+    // Habilitar persistencia offline (caché local automática)
+    try {
+      await fbFirestore.enablePersistence({ synchronizeTabs: true });
+      console.log('Persistencia offline habilitada');
+    } catch(pe) {
+      console.warn('Persistencia offline no disponible:', pe.code);
+    }
+
+    setStatus('connecting', 'Conectando...');
+    await syncProducts();
+
+  } catch(e) {
+    setStatus('error', 'Error de conexión');
+    console.error('Firebase error:', e.code, e.message);
+
+    let msg = 'Error al conectar';
+    let detail = e.message || 'Error desconocido';
+
+    if (e.code === 'permission-denied' || detail.includes('PERMISSION_DENIED')) {
+      msg = 'Permiso denegado';
+      detail = 'Las reglas de Firestore bloquean el acceso. En Firebase Console → Firestore → Reglas, publicá: allow read, write: if true;';
+    } else if (detail.includes('network') || detail.includes('fetch')) {
+      msg = 'Sin internet';
+      detail = 'Verificá tu conexión. Los datos en caché siguen disponibles.';
+    } else if (detail.includes('projectId') || detail.includes('project')) {
+      msg = 'Proyecto no encontrado';
+      detail = 'Verificá el projectId en la configuración.';
+    }
+
+    showToast('⚠️ ' + msg, 'err');
+    fbFirestore = null; fbApp = null;
+
+    document.getElementById('errorDetail').textContent = detail;
+    document.getElementById('firebaseErrorPanel').style.display = 'block';
+
+    if (Object.keys(products).length > 0) {
+      setStatus('connecting', 'Mostrando caché local');
+      showToast('Mostrando datos guardados localmente', 'warn');
+    }
+    document.getElementById('loader').style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════
+// SYNC — Cloud Firestore
+// ═══════════════════════════════════════
+async function syncProducts() {
+  if (!fbFirestore) { showToast('Sin conexión Firestore', 'warn'); return; }
+  const colName = FIREBASE_CONFIG.collection || 'productos';
+
+  document.getElementById('syncBtn').textContent = '⏳';
+  setStatus('connecting', 'Sincronizando...');
+
+  try {
+    console.log('Leyendo colección Firestore:', colName);
+
+    // Cancelar listener anterior
+    if (unsubscribeProducts) { unsubscribeProducts(); unsubscribeProducts = null; }
+
+    // Listener en tiempo real — igual que MinimarketAlberdi
+    unsubscribeProducts = fbFirestore.collection(colName).onSnapshot(
+      (snap) => {
+        products = {};
+        snap.forEach(doc => {
+          // El ID del documento ES el código de barras
+          products[doc.id] = { codigo: doc.id, ...doc.data() };
+        });
+
+        localStorage.setItem(CACHE_KEY, JSON.stringify(products));
+        const count = Object.keys(products).length;
+
+        setStatus('connected', '● Firestore conectado');
+        document.getElementById('productCount').textContent = count + ' artículos';
+        document.getElementById('lastSync').textContent = 'Sync ' + new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+        document.getElementById('firebaseErrorPanel').style.display = 'none';
+        renderProducts(document.getElementById('searchInput')?.value || '');
+
+        if (count > 0) showToast(`${count} artículos cargados ✓`, 'ok');
+        else showToast('Colección vacía — agregá productos desde MinimarketAlberdi', 'warn');
+
+        document.getElementById('loader').style.display = 'none';
+        document.getElementById('syncBtn').textContent = '🔄';
+      },
+      (err) => {
+        console.error('Firestore listener error:', err.code, err.message);
+        setStatus('error', 'Error Firestore');
+        let detail = err.message;
+        if (err.code === 'permission-denied') detail = 'Permiso denegado — en Firebase Console → Firestore → Reglas, publicá: allow read, write: if true;';
+        document.getElementById('errorDetail').textContent = detail;
+        document.getElementById('firebaseErrorPanel').style.display = 'block';
+        showToast('❌ Permiso denegado en Firestore', 'err');
+        document.getElementById('syncBtn').textContent = '🔄';
+        document.getElementById('loader').style.display = 'none';
+      }
+    );
+
+  } catch(e) {
+    setStatus('error', 'Error al leer Firestore');
+    console.error('syncProducts error:', e);
+    showToast('❌ ' + (e.message || 'Error desconocido'), 'err');
+    document.getElementById('syncBtn').textContent = '🔄';
+    throw e;
+  }
+}
+
+function loadCachedProducts() {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      products = JSON.parse(cached);
+      const count = Object.keys(products).length;
+      document.getElementById('productCount').textContent = count + ' artículos (caché)';
+      renderProducts('');
+    }
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════════
+// STATUS
+// ═══════════════════════════════════════
+function setStatus(state, msg) {
+  const dot  = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  dot.className = 'status-dot ' + (state === 'connected' ? 'connected' : state === 'error' ? 'error' : '');
+  text.textContent = msg;
+}
+
+// ═══════════════════════════════════════
+// RENDER PRODUCTS
+// ═══════════════════════════════════════
+function renderProducts(query) {
+  const list = document.getElementById('productList');
+  const empty = document.getElementById('emptyState');
+  const q = query.toLowerCase().trim();
+
+  filtered = Object.values(products).filter(p =>
+    !q ||
+    (p.nombre  && p.nombre.toLowerCase().includes(q))  ||
+    (p.codigo  && p.codigo.toLowerCase().includes(q))  ||
+    (p.categoria && p.categoria.toLowerCase().includes(q))
+  ).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
+
+  if (filtered.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'flex';
+    return;
+  }
+  empty.style.display = 'none';
+
+  list.innerHTML = filtered.map((p, i) => {
+    const stock = parseInt(p.stock) || 0;
+    const stockMin = parseInt(p.stockMin) || 0;
+    const badgeCls = stock === 0 ? 'badge-out' : stock <= stockMin ? 'badge-low' : 'badge-ok';
+    const badgeTxt = stock === 0 ? '⛔ SIN STOCK' : stock <= stockMin ? '⚠️ BAJO' : '✓ OK';
+
+    return `
+    <div class="product-card" id="card-${p.codigo}" onclick="openModal('${p.codigo}')" style="animation-delay:${i*0.04}s;cursor:pointer">
+      <div class="card-header">
+        <div class="card-name">${p.nombre || 'Sin nombre'}</div>
+        <div class="card-badge ${badgeCls}">${badgeTxt}</div>
+      </div>
+      <div class="card-meta">
+        <span class="meta-item">Stock: <span class="meta-value">${stock}</span></span>
+        <span class="meta-item">Cat: <span class="meta-value">${p.categoria || '—'}</span></span>
+      </div>
+      <div class="card-price">$${formatPrice(p.precio)}</div>
+      ${p.codigo && !p.codigo.startsWith('SIN-') ? `<div class="card-code"># ${p.codigo}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════
+// SEARCH
+// ═══════════════════════════════════════
+function handleSearch() {
+  const q = document.getElementById('searchInput').value;
+  document.getElementById('clearSearch').classList.toggle('visible', q.length > 0);
+  renderProducts(q);
+}
+
+function clearSearch() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('clearSearch').classList.remove('visible');
+  renderProducts('');
+}
+
+// ═══════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════
+function openModal(code) {
+  const p = products[code];
+  if (!p) return;
+  modalProduct = p;
+  document.getElementById('modalTitle').textContent = p.nombre || 'Producto';
+  const stock = parseInt(p.stock) || 0;
+  const stockMin = parseInt(p.stockMin) || 0;
+  const stockColor = stock === 0 ? 'var(--danger)' : stock <= stockMin ? 'var(--warn)' : 'var(--ok)';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-detail"><span class="modal-label">CÓDIGO</span><span class="modal-value">${p.codigo || '—'}</span></div>
+    <div class="modal-detail"><span class="modal-label">PRECIO VENTA</span><span class="modal-value" style="color:var(--accent)">$${formatPrice(p.precio)}</span></div>
+    <div class="modal-detail"><span class="modal-label">PRECIO COSTO</span><span class="modal-value" style="color:var(--muted)">$${formatPrice(p.costo)}</span></div>
+    <div class="modal-detail"><span class="modal-label">STOCK ACTUAL</span><span class="modal-value" style="color:${stockColor}">${stock} ${stock <= stockMin && stock > 0 ? '⚠️' : stock === 0 ? '⛔' : ''}</span></div>
+    <div class="modal-detail"><span class="modal-label">STOCK MÍN.</span><span class="modal-value">${stockMin}</span></div>
+    <div class="modal-detail"><span class="modal-label">CATEGORÍA</span><span class="modal-value">${p.categoria || '—'}</span></div>
+    <div class="modal-detail"><span class="modal-label">UNIDAD</span><span class="modal-value">${p.unidad || 'u'}</span></div>
+    <div class="modal-detail"><span class="modal-label">ÚLTIMA ACT.</span><span class="modal-value">${p.updatedAt ? new Date(p.updatedAt).toLocaleDateString('es-AR') : '—'}</span></div>
+
+    <!-- RESTAR STOCK -->
+    <div style="margin-top:18px;background:rgba(255,59,92,0.07);border:1px solid rgba(255,59,92,0.25);border-radius:12px;padding:14px">
+      <div style="font-size:11px;font-family:var(--font-mono);color:var(--muted);letter-spacing:1px;margin-bottom:10px">RESTAR STOCK</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <input id="restarCantidad" type="number" inputmode="numeric" min="1" value="1"
+          style="width:70px;height:46px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:18px;font-weight:700;text-align:center;outline:none;font-family:var(--font-head)">
+        <button onclick="confirmarRestarStock()" 
+          style="flex:1;height:46px;border-radius:10px;background:rgba(255,59,92,0.15);border:1px solid rgba(255,59,92,0.4);color:var(--danger);font-family:var(--font-head);font-size:13px;font-weight:700;cursor:pointer;letter-spacing:1px">
+          − RESTAR DEL STOCK
+        </button>
+      </div>
+    </div>
+  `;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function confirmarRestarStock() {
+  const cantidad = parseInt(document.getElementById('restarCantidad').value) || 0;
+  if (cantidad <= 0) { showToast('Ingresá una cantidad válida', 'err'); return; }
+  const stockActual = parseInt(modalProduct.stock) || 0;
+  if (cantidad > stockActual) { showToast(`Solo hay ${stockActual} en stock`, 'err'); return; }
+
+  // Mostrar advertencia antes de confirmar
+  const advertencia = document.createElement('div');
+  advertencia.id = 'stockWarning';
+  advertencia.style.cssText = `
+    position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;
+    display:flex;align-items:center;justify-content:center;padding:20px;
+  `;
+  advertencia.innerHTML = `
+    <div style="background:var(--surface);border:2px solid var(--danger);border-radius:20px;padding:28px;width:100%;max-width:360px;text-align:center">
+      <div style="font-size:36px;margin-bottom:12px">⚠️</div>
+      <div style="font-size:16px;font-weight:700;color:var(--danger);font-family:var(--font-head);margin-bottom:8px;letter-spacing:1px">ESTÁ A PUNTO DE RESTAR STOCK</div>
+      <div style="font-size:14px;color:var(--text);margin-bottom:6px">${modalProduct.nombre}</div>
+      <div style="font-size:13px;color:var(--muted);font-family:var(--font-mono);margin-bottom:20px">
+        Stock actual: <b style="color:var(--text)">${stockActual}</b> → nuevo: <b style="color:var(--warn)">${stockActual - cantidad}</b>
+        <br>Restando: <b style="color:var(--danger)">${cantidad} unidad${cantidad > 1 ? 'es' : ''}</b>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button onclick="document.getElementById('stockWarning').remove()" 
+          style="flex:1;height:52px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);font-family:var(--font-head);font-size:14px;font-weight:700;cursor:pointer">
+          CANCELAR
+        </button>
+        <button onclick="ejecutarRestarStock(${cantidad})" 
+          style="flex:1;height:52px;border-radius:12px;background:rgba(255,59,92,0.2);border:1px solid var(--danger);color:var(--danger);font-family:var(--font-head);font-size:14px;font-weight:700;cursor:pointer">
+          CONFIRMAR
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(advertencia);
+}
+
+async function ejecutarRestarStock(cantidad) {
+  document.getElementById('stockWarning')?.remove();
+  if (!fbFirestore || !modalProduct) return;
+  const stockActual = parseInt(modalProduct.stock) || 0;
+  const nuevoStock = stockActual - cantidad;
+  const codigo = modalProduct.codigo;
+  try {
+    await fbFirestore.collection('productos').doc(codigo).update({
+      stock: nuevoStock,
+      updatedAt: new Date().toISOString()
+    });
+    // El listener onSnapshot actualizará products[], así que solo cerramos
+    closeModal({ target: { id: 'modal-overlay' } });
+    showToast(`✓ Stock actualizado: ${stockActual} → ${nuevoStock}`, 'ok');
+  } catch(e) {
+    showToast('Error al actualizar: ' + e.message, 'err');
+  }
+}
+
+function closeModal(e) {
+  if (!e || e.target.id === 'modal-overlay') {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+}
+
+// ═══════════════════════════════════════
+// ADD PRODUCT MODAL
+// ═══════════════════════════════════════
+function openAddProduct() {
+  document.getElementById('new-codigo').value = '';
+  document.getElementById('new-nombre').value = '';
+  document.getElementById('new-costo').value = '';
+  document.getElementById('new-precio').value = '';
+  document.getElementById('new-proveedor').value = '';
+  document.getElementById('new-stock').value = '';
+  document.getElementById('new-stock-min').value = '';
+  document.getElementById('add-product-overlay').classList.add('open');
+}
+
+function closeAddProductOutside(e) {
+  if(e.target.id==='add-product-overlay') closeAddProduct();
+}
+
+async function saveNewProduct() {
+  const codigo    = document.getElementById('new-codigo').value.trim();
+  const nombre    = document.getElementById('new-nombre').value.trim();
+  const costo     = parseFloat(document.getElementById('new-costo').value) || 0;
+  const precio    = parseFloat(document.getElementById('new-precio').value) || 0;
+  const proveedor = document.getElementById('new-proveedor').value.trim();
+  const stock     = parseInt(document.getElementById('new-stock').value) || 0;
+  const stockMin  = parseInt(document.getElementById('new-stock-min').value) || 0;
+
+  if (!nombre || !precio) {
+    showToast('Completá al menos nombre y precio de venta', 'err');
+    return;
+  }
+
+  // Si no tiene código, generar uno automático con prefijo SIN- + timestamp
+  const codigoFinal = codigo || ('SIN-' + Date.now());
+
+  if (!fbFirestore) {
+    showToast('Sin conexión a Firestore', 'warn');
+    return;
+  }
+
+  try {
+    // Campos iguales a MinimarketAlberdi + proveedor
+    const newProduct = {
+      codigo: codigoFinal,
+      nombre,
+      costo,
+      precio,
+      stock,
+      stockMin,
+      proveedor,
+      categoria: '',
+      unidad: 'u',
+      updatedAt: new Date().toISOString()
+    };
+    
+    await fbFirestore.collection('productos').doc(codigoFinal).set(newProduct);
+    closeAddProduct();
+    flash();
+    showToast('✓ ' + nombre + ' guardado', 'ok');
+    // El listener onSnapshot actualizará products automáticamente
+  } catch(e) {
+    showToast('Error al guardar: ' + e.message, 'err');
+  }
+}
+
+// ═══════════════════════════════════════
+// SCANNER ENGINE — ZXing MultiFormatReader
+// Soporta EAN-13, EAN-8, UPC-A, UPC-E,
+// Code128, Code39, ITF, QR y más
+// ═══════════════════════════════════════
+let zxingReader = null;
+
+function getZXingReader() {
+  if (!zxingReader) {
+    const hints = new Map();
+    const formats = [
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.QR_CODE,
+      ZXing.BarcodeFormat.DATA_MATRIX,
+    ];
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    zxingReader = new ZXing.MultiFormatReader();
+    zxingReader.setHints(hints);
+  }
+  return zxingReader;
+}
+
+function decodeFromCanvas(canvas) {
+  try {
+    const reader = getZXingReader();
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const lum = new ZXing.RGBLuminanceSource(imgData.data, canvas.width, canvas.height);
+    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+    const result = reader.decode(bmp);
+    return result ? result.getText() : null;
+  } catch(e) {
+    // NotFoundException es normal cuando no hay código en el frame
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════
+// FORM CAMERA — cámara dentro del formulario
+// ═══════════════════════════════════════
+let formCameraStream = null;
+let formCameraScanId = null;
+let formCameraOn     = false;
+
+async function toggleFormCamera() {
+  if (formCameraOn) { stopFormCamera(); } else { await startFormCamera(); }
+}
+
+async function startFormCamera() {
+  const view  = document.getElementById('formCameraView');
+  const video = document.getElementById('formCameraVideo');
+  const btn   = document.getElementById('formCamBtn');
+
+  view.style.display = 'block';
+  btn.textContent = '⏳';
+  btn.disabled = true;
+
+  try {
+    formCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = formCameraStream;
+
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Timeout')), 8000);
+      video.onloadedmetadata = () => { clearTimeout(t); resolve(); };
+      video.onerror = (e) => { clearTimeout(t); reject(e); };
+    });
+
+    await video.play();
+    formCameraOn = true;
+    btn.textContent = '⏹';
+    btn.disabled = false;
+    btn.style.background = 'rgba(255,107,53,0.5)';
+    formCameraScanId = setInterval(scanFormFrame, 250);
+
+  } catch(e) {
+    console.error('Form camera error:', e.name, e.message);
+    stopFormCamera();
+    let msg = 'No se pudo abrir la cámara';
+    if (e.name === 'NotAllowedError') msg = 'Permiso de cámara denegado';
+    else if (e.name === 'NotFoundError') msg = 'No se encontró cámara';
+    else if (e.name === 'NotReadableError') msg = 'Cámara ocupada por otra app';
+    showToast('📷 ' + msg, 'err');
+  }
+}
+
+function stopFormCamera() {
+  if (formCameraScanId) { clearInterval(formCameraScanId); formCameraScanId = null; }
+  if (formCameraStream) { formCameraStream.getTracks().forEach(t => t.stop()); formCameraStream = null; }
+  const video = document.getElementById('formCameraVideo');
+  if (video) video.srcObject = null;
+  document.getElementById('formCameraView').style.display = 'none';
+  const btn = document.getElementById('formCamBtn');
+  if (btn) { btn.textContent = '📷'; btn.disabled = false; btn.style.background = 'rgba(255,107,53,0.15)'; }
+  formCameraOn = false;
+}
+
+function scanFormFrame() {
+  const video  = document.getElementById('formCameraVideo');
+  const canvas = document.getElementById('formCameraCanvas');
+  if (!formCameraOn || !video || video.readyState < 2 || video.videoWidth === 0) return;
+
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0);
+
+  const code = decodeFromCanvas(canvas);
+  if (code) {
+    document.getElementById('new-codigo').value = code;
+    stopFormCamera();
+    showToast('✓ Código: ' + code, 'ok');
+    setTimeout(() => document.getElementById('new-nombre').focus(), 200);
+  }
+}
+
+function closeAddProduct() {
+  stopFormCamera();
+  document.getElementById('add-product-overlay').classList.remove('open');
+}
+
+// ═══════════════════════════════════════
+// INLINE CAMERA SCANNER — barra de búsqueda
+// ═══════════════════════════════════════
+let cameraStream  = null;
+let cameraScanId  = null;
+let cameraOn      = false;
+
+async function toggleCamera() {
+  if (cameraOn) { stopCamera(); } else { await startCamera(); }
+}
+
+async function startCamera() {
+  const view   = document.getElementById('cameraView');
+  const video  = document.getElementById('cameraVideo');
+  const camBtn = document.getElementById('camBtn');
+
+  view.style.display = 'block';
+  camBtn.textContent = '⏳';
+  camBtn.disabled = true;
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = cameraStream;
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timeout iniciando cámara')), 8000);
+      video.onloadedmetadata = () => { clearTimeout(timeout); resolve(); };
+      video.onerror = (e) => { clearTimeout(timeout); reject(e); };
+    });
+
+    await video.play();
+    cameraOn = true;
+    camBtn.textContent = '⏹';
+    camBtn.disabled = false;
+    camBtn.style.background = 'rgba(255,107,53,0.5)';
+    cameraScanId = setInterval(scanFrame, 250);
+
+  } catch(e) {
+    console.error('Camera error:', e.name, e.message);
+    stopCamera();
+    let msg = 'No se pudo abrir la cámara';
+    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+      msg = 'Permiso de cámara denegado — habilitalo en configuración del navegador';
+    } else if (e.name === 'NotFoundError') {
+      msg = 'No se encontró cámara en el dispositivo';
+    } else if (e.name === 'NotReadableError') {
+      msg = 'La cámara está siendo usada por otra app';
+    } else if (e.message) {
+      msg = e.message;
+    }
+    showToast('📷 ' + msg, 'err');
+  }
+}
+
+function stopCamera() {
+  if (cameraScanId) { clearInterval(cameraScanId); cameraScanId = null; }
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  const video = document.getElementById('cameraVideo');
+  if (video) { video.srcObject = null; }
+  document.getElementById('cameraView').style.display = 'none';
+  const camBtn = document.getElementById('camBtn');
+  if (camBtn) {
+    camBtn.textContent = '📷';
+    camBtn.disabled = false;
+    camBtn.style.background = 'rgba(255,107,53,0.15)';
+  }
+  cameraOn = false;
+}
+
+function scanFrame() {
+  const video  = document.getElementById('cameraVideo');
+  const canvas = document.getElementById('cameraCanvas');
+  if (!cameraOn || !video || video.readyState < 2 || video.videoWidth === 0) return;
+
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0);
+
+  const code = decodeFromCanvas(canvas);
+  if (code) {
+    stopCamera();
+    processBarcode(code);
+  }
+}
+
+function processBarcode(barcode) {
+  if (!barcode) return;
+  stopCamera();
+
+  // Poner el código en el buscador y filtrar
+  const input = document.getElementById('searchInput');
+  input.value = barcode;
+  document.getElementById('clearSearch').style.display = 'block';
+  handleSearch();
+
+  if (products[barcode]) {
+    showToast('✓ ' + products[barcode].nombre, 'ok');
+    // Abrir detalle directamente
+    setTimeout(() => openModal(barcode), 300);
+  } else {
+    showToast('Código ' + barcode + ' no registrado — completá los datos', 'warn');
+    // Abrir formulario de nuevo producto con el código ya cargado
+    setTimeout(() => {
+      document.getElementById('new-codigo').value = barcode;
+      openAddProduct();
+    }, 400);
+  }
+}
+
+// Búsqueda manual también detecta Enter en el buscador principal
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('searchInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      const val = this.value.trim();
+      if (val && !filtered.find(p => p.nombre?.toLowerCase().includes(val.toLowerCase()))) {
+        // Podría ser un código escrito a mano
+        if (/^\d{6,14}$/.test(val)) processBarcode(val);
+      }
+    }
+  });
+});
+
+// ═══════════════════════════════════════
+// FULLSCREEN
+// ═══════════════════════════════════════
+function toggleFullscreen() {
+  const el = document.documentElement;
+  if (!document.fullscreenElement) {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
+    if (req) req.call(el);
+    showToast('Pantalla completa activa', 'ok');
+  } else {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen;
+    if (exit) exit.call(document);
+    showToast('Pantalla completa desactivada', 'warn');
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  const btn = document.getElementById('fsBtn');
+  if (btn) btn.title = document.fullscreenElement ? 'Salir de pantalla completa' : 'Pantalla completa';
+});
+document.addEventListener('webkitfullscreenchange', () => {
+  const btn = document.getElementById('fsBtn');
+  if (btn) btn.title = document.webkitFullscreenElement ? 'Salir de pantalla completa' : 'Pantalla completa';
+});
+
+// ═══════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════
+function formatPrice(v) {
+  const n = parseFloat(v) || 0;
+  if (n >= 1000) return n.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return n.toFixed(2);
+}
+
+function dateStamp() {
+  return new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+}
+
+function flash() {
+  const el = document.getElementById('flash');
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 120);
+}
+
+let toastTimer;
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ t.className=''; }, 2800);
+}
+
+// ═══════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
